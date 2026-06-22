@@ -714,7 +714,7 @@
       </ul>
     </div>
     <script>
-      fetch(`http://127.0.0.1:8000/earthquakes/india`)
+      fetch('https://sky-disaster-assistant.onrender.com/earthquakes/india')
         .then(r => r.json())
         .then(data => {
           const list = document.getElementById('eq-list');
@@ -841,7 +841,7 @@
 
 <script>
   /* ── Config ── */
-  const BACKEND = 'http://127.0.0.1:8000';
+  const BACKEND = 'https://sky-disaster-assistant.onrender.com';
 
   /* ════════════════════════════════════════════
      FEATURE 1 — Live stats from backend
