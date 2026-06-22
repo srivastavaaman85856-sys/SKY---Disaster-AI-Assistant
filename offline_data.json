@@ -1,0 +1,46 @@
+{
+  "earthquake": {
+    "do": [
+      "Drop, Cover, and Hold On immediately",
+      "Stay away from windows and heavy objects",
+      "Move to open ground after shaking stops"
+    ],
+    "dont": [
+      "Run outside during shaking",
+      "Use elevators",
+      "Stand under overpasses or bridges"
+    ],
+    "helpline": "1078"
+  },
+  "flood": {
+    "do": [
+      "Move to higher ground immediately",
+      "Carry emergency kit (water, torch, medicines)",
+      "Follow NDMA evacuation routes"
+    ],
+    "dont": [
+      "Drive through flooded roads",
+      "Touch electrical switches in wet areas"
+    ],
+    "helpline": "1077"
+  },
+  "cyclone": {
+    "do": [
+      "Go to nearest cyclone shelter",
+      "Store drinking water and dry food",
+      "Stay indoors away from windows"
+    ],
+    "dont": [
+      "Go near the coast or beach",
+      "Believe the storm is over during eye of cyclone"
+    ],
+    "helpline": "1070"
+  },
+  "general": {
+    "ndrf_helpline": "011-24363260",
+    "ndma_helpline": "1078",
+    "ambulance": "108",
+    "police": "100",
+    "fire": "101"
+  }
+}

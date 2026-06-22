@@ -1,0 +1,1201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>SKY — AI Disaster Assistant</title>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+
+    .leaflet-incident-label {
+  background: rgba(6,13,31,0.9) !important;
+  border: 1px solid currentColor !important;
+  color: #e8f4ff !important;
+  font-family: var(--font) !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  padding: 2px 6px !important;
+}
+.leaflet-container { background: #07122a !important; }
+
+    /* ── Design tokens ── */
+    :root {
+      --bg:          #060d1f;
+      --surface:     #0d1b35;
+      --surface-2:   #112040;
+      --border:      #1e3a5f;
+      --input:       #0a1628;
+      --primary:     #00d4ff;
+      --primary-fg:  #060d1f;
+      --secondary:   #0a2a4a;
+      --secondary-fg:#00d4ff;
+      --fg:          #e8f4ff;
+      --muted:       #6a8faf;
+      --red:         #ff3d3d;
+      --orange:      #ff8c00;
+      --yellow:      #ffd700;
+      --green:       #00e676;
+      --font:        'Space Grotesk', system-ui, sans-serif;
+      --radius:      8px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--font);
+      background: radial-gradient(ellipse at top left, #0d1b35 0%, #060d1f 60%);
+      min-height: 100vh;
+      color: var(--fg);
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Scanline overlay ── */
+    body::before {
+      content: '';
+      position: fixed; inset: 0; pointer-events: none; z-index: 0;
+      background-image: repeating-linear-gradient(
+        0deg, transparent, transparent 2px,
+        rgba(0,212,255,0.012) 2px, rgba(0,212,255,0.012) 4px
+      );
+    }
+
+    /* ── Top bar ── */
+    #topbar {
+      position: relative; z-index: 10;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 32px; height: 60px; flex-shrink: 0;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand-icon {
+      width: 36px; height: 36px; border-radius: var(--radius);
+      background: var(--primary);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .brand-icon svg { color: var(--primary-fg); }
+    .brand-name {
+      font-size: 20px; font-weight: 700; color: var(--primary);
+      letter-spacing: 0.1em; text-transform: uppercase;
+    }
+    .brand-sub {
+      font-size: 11px; color: var(--muted);
+      letter-spacing: 0.1em; text-transform: uppercase;
+    }
+
+    .topbar-center { display: flex; align-items: center; gap: 20px; }
+    .topbar-item {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 13px; color: var(--muted);
+    }
+    .topbar-item svg { width: 14px; height: 14px; }
+    .topbar-divider { width: 1px; height: 20px; background: var(--border); }
+
+    .status-dot-green {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--green); box-shadow: 0 0 8px var(--green);
+    }
+
+    .topbar-right { display: flex; align-items: center; gap: 12px; }
+    .btn-lang {
+      display: flex; align-items: center; gap: 6px;
+      border: 1px solid var(--border); color: var(--muted);
+      background: transparent; font-family: var(--font);
+      font-size: 13px; padding: 6px 14px; border-radius: var(--radius);
+      cursor: pointer; transition: border-color 0.2s, color 0.2s;
+    }
+    .btn-lang:hover { border-color: var(--primary); color: var(--primary); }
+    .btn-lang svg { width: 14px; height: 14px; }
+
+    .btn-emergency {
+      display: flex; align-items: center; gap: 6px;
+      background: var(--red); color: var(--fg);
+      font-family: var(--font); font-size: 13px; font-weight: 700;
+      padding: 7px 16px; border-radius: var(--radius); border: none;
+      cursor: pointer; box-shadow: 0 0 14px rgba(255,61,61,0.4);
+      transition: opacity 0.2s;
+    }
+    .btn-emergency:hover { opacity: 0.85; }
+    .btn-emergency svg { width: 14px; height: 14px; }
+
+    /* ── Main layout ── */
+    #main {
+      position: relative; z-index: 1;
+      display: flex; flex: 1; gap: 24px;
+      padding: 24px 32px; overflow: hidden; height: calc(100vh - 60px);
+    }
+
+    /* ── Left panel ── */
+    #left-panel {
+      width: 340px; flex-shrink: 0;
+      display: flex; flex-direction: column; gap: 20px;
+      overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+    }
+    #left-panel::-webkit-scrollbar { width: 3px; }
+    #left-panel::-webkit-scrollbar-thumb { background: var(--border); }
+
+    /* Stat grid */
+    .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .stat-tile {
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 16px 20px;
+      display: flex; align-items: center; gap: 14px;
+    }
+    .stat-icon { flex-shrink: 0; }
+    .stat-icon svg { width: 24px; height: 24px; }
+    .stat-num { font-size: 24px; font-weight: 700; line-height: 1; }
+    .stat-label {
+      font-size: 11px; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.08em; margin-top: 2px;
+    }
+
+    /* Map */
+    .panel-box {
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: var(--radius); overflow: hidden;
+    }
+    .panel-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 20px; border-bottom: 1px solid var(--border);
+    }
+    .panel-title {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 13px; font-weight: 700; color: var(--fg);
+    }
+    .panel-title svg { width: 15px; height: 15px; color: var(--primary); }
+    .map-legend { display: flex; align-items: center; gap: 10px; }
+    .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); }
+    .legend-dot { width: 7px; height: 7px; border-radius: 50%; }
+
+    .map-body {
+      position: relative; height: 180px;
+      background: linear-gradient(135deg, #07122a 0%, #0a1e3a 50%, #071528 100%);
+    }
+    .map-grid {
+      position: absolute; inset: 0; opacity: 0.15; pointer-events: none;
+    }
+    .map-pin {
+      position: absolute; display: flex; flex-direction: column; align-items: center;
+      transform: translate(-50%, -50%);
+    }
+    .map-pin-dot {
+      width: 12px; height: 12px; border-radius: 50%; border: 2px solid currentColor;
+    }
+    .map-pin-label {
+      font-size: 10px; font-weight: 700; margin-top: 3px;
+      padding: 2px 6px; border-radius: 4px;
+      background: rgba(6,13,31,0.85); border: 1px solid currentColor;
+    }
+
+    /* Alerts */
+    .section-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .section-title {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 12px; font-weight: 700; color: var(--fg);
+      text-transform: uppercase; letter-spacing: 0.08em;
+    }
+    .section-title svg { width: 14px; height: 14px; color: var(--primary); }
+    .section-sub { font-size: 11px; color: var(--muted); }
+
+    .alert-cards { display: flex; flex-direction: column; gap: 10px; }
+    .alert-card {
+      background: var(--surface-2); border-radius: var(--radius);
+      padding: 14px 16px; display: flex; flex-direction: column; gap: 8px;
+    }
+    .alert-card.red    { border: 1px solid var(--red);    box-shadow: 0 0 14px rgba(255,61,61,0.2); }
+    .alert-card.orange { border: 1px solid var(--orange);  box-shadow: 0 0 14px rgba(255,140,0,0.2); }
+    .alert-card.yellow { border: 1px solid var(--yellow);  box-shadow: 0 0 14px rgba(255,215,0,0.15); }
+    .alert-card.green  { border: 1px solid var(--green);   box-shadow: 0 0 14px rgba(0,230,118,0.15); }
+
+    /* Clickable card hover */
+    .alert-card[data-query] { transition: filter 0.15s, transform 0.15s; }
+    .alert-card[data-query]:hover { filter: brightness(1.15); transform: translateX(3px); }
+
+    .alert-top { display: flex; align-items: center; justify-content: space-between; }
+    .alert-level { display: flex; align-items: center; gap: 6px; }
+    .alert-dot { width: 7px; height: 7px; border-radius: 50%; }
+    .alert-badge { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
+    .alert-time { font-size: 11px; color: var(--muted); }
+    .alert-body { display: flex; align-items: flex-start; gap: 10px; }
+    .alert-body svg { width: 18px; height: 18px; flex-shrink: 0; margin-top: 1px; }
+    .alert-name { font-size: 14px; font-weight: 700; color: var(--fg); }
+    .alert-loc { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 4px; margin-top: 2px; }
+    .alert-loc svg { width: 10px; height: 10px; }
+    .alert-desc { font-size: 12px; color: var(--muted); margin-top: 6px; line-height: 1.5; }
+
+    /* ── Right panel (chat) ── */
+    #right-panel { flex: 1; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+    /* Info bar */
+    #info-bar {
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 10px 18px;
+      display: flex; align-items: center; gap: 16px; flex-shrink: 0;
+    }
+    .info-tag {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 12px; font-weight: 700; color: var(--primary); text-transform: uppercase; letter-spacing: 0.08em;
+    }
+    .info-pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--primary); box-shadow: 0 0 6px var(--primary); }
+    .info-bar-divider { width: 1px; height: 16px; background: var(--border); }
+    .info-text { font-size: 12px; color: var(--muted); }
+    .info-shortcuts { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+    .kbd {
+      font-size: 11px; padding: 2px 8px; border-radius: 4px;
+      background: var(--secondary); color: var(--secondary-fg); font-weight: 700;
+    }
+    .kbd-label { font-size: 11px; color: var(--muted); }
+
+    /* Chat panel */
+    #chat-panel {
+      flex: 1; background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); display: flex; flex-direction: column;
+      min-height: 0;
+    }
+    #chat-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    .chat-agent { display: flex; align-items: center; gap: 12px; }
+    .agent-avatar {
+      width: 32px; height: 32px; border-radius: 50%;
+      background: var(--primary);
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 0 12px rgba(0,212,255,0.5); flex-shrink: 0;
+    }
+    .agent-avatar svg { width: 16px; height: 16px; color: var(--primary-fg); }
+    .agent-name { font-size: 14px; font-weight: 700; color: var(--fg); }
+    .agent-status { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--green); margin-top: 1px; }
+    .agent-status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+    .chat-header-btns { display: flex; align-items: center; gap: 8px; }
+    .icon-btn {
+      border: 1px solid var(--border); color: var(--muted);
+      background: transparent; border-radius: var(--radius);
+      width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+      cursor: pointer; transition: border-color 0.2s, color 0.2s;
+    }
+    .icon-btn svg { width: 15px; height: 15px; }
+    .icon-btn:hover { border-color: var(--primary); color: var(--primary); }
+
+    /* Messages */
+    #chat-messages {
+      flex: 1; overflow-y: auto; padding: 20px;
+      display: flex; flex-direction: column; gap: 18px;
+      scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+    }
+    #chat-messages::-webkit-scrollbar { width: 3px; }
+    #chat-messages::-webkit-scrollbar-thumb { background: var(--border); }
+
+    .empty-state {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 12px; text-align: center; color: var(--muted); padding: 40px 0;
+    }
+    .empty-icon {
+      width: 56px; height: 56px; border-radius: 50%;
+      background: var(--surface-2); border: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center; font-size: 24px;
+    }
+    .empty-state p { font-size: 13px; max-width: 200px; line-height: 1.5; }
+
+    /* Bubbles */
+    .msg-row { display: flex; align-items: flex-end; gap: 10px; }
+    .msg-row.user { justify-content: flex-end; }
+    .msg-row.bot  { justify-content: flex-start; }
+
+    .msg-avatar {
+      width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center; font-size: 13px;
+    }
+    .msg-avatar.bot-av {
+      background: var(--primary); box-shadow: 0 0 10px rgba(0,212,255,0.4);
+    }
+    .msg-avatar.bot-av svg { width: 15px; height: 15px; color: var(--primary-fg); }
+    .msg-avatar.user-av { background: #1e3a5f; font-size: 11px; font-weight: 700; color: var(--primary); }
+
+    .msg-content { display: flex; flex-direction: column; gap: 4px; max-width: 420px; }
+    .msg-row.user .msg-content { align-items: flex-end; }
+
+    .bubble {
+      padding: 12px 16px; border-radius: 10px;
+      font-size: 13px; line-height: 1.6; word-break: break-word;
+    }
+    .bubble.bot {
+      background: var(--surface-2); border: 1px solid var(--border);
+      color: var(--fg); border-top-left-radius: 3px;
+    }
+    .bubble.user {
+      background: var(--secondary); border: 1px solid var(--border);
+      color: var(--fg); border-top-right-radius: 3px;
+    }
+    .msg-meta { display: flex; align-items: center; gap: 6px; }
+    .msg-time { font-size: 11px; color: var(--muted); }
+    .msg-lang {
+      font-size: 10px; color: var(--green);
+      background: rgba(0,230,118,0.1); border-radius: 999px; padding: 1px 7px;
+    }
+
+    /* Typing */
+    .typing-dots { display: flex; gap: 4px; padding: 14px 16px; }
+    .typing-dot {
+      width: 6px; height: 6px; border-radius: 50%; background: var(--muted);
+      animation: tdot 1.2s infinite;
+    }
+    .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes tdot { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-5px)} }
+
+    /* ── Input area ── */
+    #chat-input-area {
+      border-top: 1px solid var(--border); padding: 14px 20px; flex-shrink: 0;
+    }
+
+    /* Mode toggle */
+    .mode-toggle { display: flex; gap: 8px; margin-bottom: 12px; }
+    .mode-btn {
+      display: flex; align-items: center; gap: 6px;
+      font-family: var(--font); font-size: 12px; font-weight: 700;
+      padding: 5px 12px; border-radius: var(--radius); cursor: pointer;
+      transition: all 0.15s;
+    }
+    .mode-btn svg { width: 12px; height: 12px; }
+    .mode-btn.active {
+      background: var(--primary); color: var(--primary-fg); border: none;
+    }
+    .mode-btn.inactive {
+      background: transparent; color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .mode-btn.inactive:hover { border-color: var(--primary); color: var(--primary); }
+
+    /* Text input row */
+    .input-row { display: flex; gap: 12px; align-items: center; }
+    #user-input {
+      flex: 1; background: var(--input); border: 1px solid var(--border);
+      border-radius: var(--radius); color: var(--fg);
+      font-family: var(--font); font-size: 13px; padding: 10px 16px;
+      outline: none; transition: border-color 0.2s; resize: none;
+      min-height: 42px; max-height: 100px; overflow-y: auto; line-height: 1.5;
+      display: flex; align-items: center;
+    }
+    #user-input::placeholder { color: var(--muted); }
+    #user-input:focus { border-color: var(--primary); }
+
+    #send-btn {
+      background: var(--primary); color: var(--primary-fg);
+      border: none; border-radius: var(--radius); cursor: pointer;
+      display: flex; align-items: center; gap: 8px;
+      font-family: var(--font); font-size: 13px; font-weight: 700;
+      padding: 10px 18px; box-shadow: 0 0 16px rgba(0,212,255,0.3);
+      transition: opacity 0.15s, transform 0.1s; flex-shrink: 0;
+    }
+    #send-btn svg { width: 15px; height: 15px; }
+    #send-btn:hover { opacity: 0.85; }
+    #send-btn:active { transform: scale(0.97); }
+    #send-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+    /* Mic state */
+    #mic-area {
+      display: none; align-items: center; justify-content: center;
+      flex-direction: column; gap: 10px; padding: 6px 0;
+    }
+    #mic-area.active { display: flex; }
+    #mic-btn {
+      width: 52px; height: 52px; border-radius: 50%;
+      background: var(--surface-2); border: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; color: var(--muted); transition: all 0.2s;
+    }
+    #mic-btn svg { width: 20px; height: 20px; }
+    #mic-btn:hover { border-color: var(--primary); color: var(--primary); }
+    #mic-btn.listening {
+      background: rgba(255,61,61,0.15); border-color: var(--red); color: var(--red);
+      animation: mic-ring 1s infinite;
+    }
+    #mic-label { font-size: 12px; color: var(--muted); }
+    @keyframes mic-ring {
+      0%,100% { box-shadow: 0 0 0 0 rgba(255,61,61,0.4); }
+      50%      { box-shadow: 0 0 0 10px rgba(255,61,61,0); }
+    }
+
+    /* Language modal */
+    #lang-modal {
+      display: none; position: fixed; inset: 0; z-index: 100;
+      background: rgba(6,13,31,0.8); backdrop-filter: blur(4px);
+      align-items: center; justify-content: center;
+    }
+    #lang-modal.open { display: flex; }
+    .modal-box {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; padding: 28px; width: 380px;
+    }
+    .modal-title {
+      font-size: 16px; font-weight: 700; color: var(--fg);
+      margin-bottom: 20px; display: flex; align-items: center; gap: 8px;
+    }
+    .modal-title svg { width: 18px; height: 18px; color: var(--primary); }
+    .lang-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .lang-option {
+      padding: 8px 12px; border-radius: var(--radius);
+      border: 1px solid var(--border); background: var(--surface-2);
+      font-family: var(--font); font-size: 13px; color: var(--muted);
+      cursor: pointer; text-align: left; transition: all 0.15s;
+    }
+    .lang-option:hover, .lang-option.selected {
+      border-color: var(--primary); color: var(--primary); background: rgba(0,212,255,0.07);
+    }
+    .modal-footer { margin-top: 16px; text-align: right; }
+    .modal-close {
+      background: var(--primary); color: var(--primary-fg);
+      border: none; border-radius: var(--radius); font-family: var(--font);
+      font-size: 13px; font-weight: 700; padding: 8px 20px; cursor: pointer;
+    }
+
+    /* Emergency modal */
+    #emergency-modal {
+      display: none; position: fixed; inset: 0; z-index: 100;
+      background: rgba(6,13,31,0.85); backdrop-filter: blur(4px);
+      align-items: center; justify-content: center;
+    }
+    #emergency-modal.open { display: flex; }
+    .emergency-box {
+      background: var(--surface); border: 2px solid var(--red);
+      border-radius: 12px; padding: 28px; width: 400px;
+      box-shadow: 0 0 40px rgba(255,61,61,0.3);
+    }
+    .emergency-title {
+      font-size: 18px; font-weight: 700; color: var(--red);
+      margin-bottom: 16px; display: flex; align-items: center; gap: 8px;
+    }
+    .emergency-numbers { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+    .emergency-number {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px; background: rgba(255,61,61,0.08);
+      border: 1px solid rgba(255,61,61,0.25); border-radius: var(--radius);
+    }
+    .emergency-number span { font-size: 13px; color: var(--fg); }
+    .emergency-number strong { font-size: 16px; color: var(--red); font-weight: 700; }
+    .emergency-close {
+      width: 100%; background: var(--surface-2); color: var(--muted);
+      border: 1px solid var(--border); border-radius: var(--radius);
+      font-family: var(--font); font-size: 13px; padding: 10px; cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div id="offline-banner" style="display:none; background:#e74c3c;
+  color:white; text-align:center; padding:8px; font-weight:bold;">
+  ⚠️ You are offline — showing cached disaster guidance
+</div>
+<script>
+  window.addEventListener('offline', () =>
+    document.getElementById('offline-banner').style.display = 'block');
+  window.addEventListener('online', () =>
+    document.getElementById('offline-banner').style.display = 'none');
+</script>
+
+<!-- ── Top bar ── -->
+<nav id="topbar">
+  <div class="brand">
+    <div class="brand-icon">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3M12 9v4m0 4h.01"/>
+      </svg>
+    </div>
+    <div>
+      <div class="brand-name">SKY</div>
+      <div class="brand-sub">AI Disaster Assistant</div>
+    </div>
+  </div>
+
+  <div class="topbar-center">
+    <div class="topbar-item">
+      <div class="status-dot-green"></div>
+      <span style="text-transform:uppercase;letter-spacing:0.08em;font-size:12px;">System Active</span>
+    </div>
+    <div class="topbar-divider"></div>
+    <div class="topbar-item">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20a14.5 14.5 0 0 0 0-20M2 12h20"/></svg>
+      <span id="active-lang-display">English</span>
+    </div>
+    <div class="topbar-divider"></div>
+    <div class="topbar-item">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+      <span>Live Feed</span>
+    </div>
+  </div>
+
+  <div class="topbar-right">
+    <button class="btn-lang" onclick="openLangModal()" aria-label="Change language">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20a14.5 14.5 0 0 0 0-20M2 12h20"/></svg>
+      Change Language
+    </button>
+    <button class="btn-emergency" onclick="openEmergencyModal()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18v-6a5 5 0 1 1 10 0v6M5 21a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-1a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2zm16-9h1m-3.5-7.5L18 5M2 12h1m9-10v1M4.929 4.929l.707.707M12 12v6"/></svg>
+      Emergency
+    </button>
+  </div>
+</nav>
+
+<!-- ── Main ── -->
+<div id="main">
+
+  <!-- Left panel -->
+  <aside id="left-panel">
+
+    <!-- Stats -->
+    <div class="stat-grid">
+      <div class="stat-tile">
+        <div class="stat-icon" style="color:var(--red);filter:drop-shadow(0 0 6px rgba(255,61,61,0.3))">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3q1 4 4 6.5t3 5.5a1 1 0 0 1-14 0a5 5 0 0 1 1-3a1 1 0 0 0 5 0c0-2-1.5-3-1.5-5q0-2 2.5-4"/></svg>
+        </div>
+        <div>
+          <div class="stat-num" id="stat-fires">7</div>
+          <div class="stat-label">Active Fires</div>
+        </div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-icon" style="color:var(--orange);filter:drop-shadow(0 0 6px rgba(255,140,0,0.3))">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242M16 14v6m-8-6v6m4-4v6"/></svg>
+        </div>
+        <div>
+          <div class="stat-num" id="stat-floods">4</div>
+          <div class="stat-label">Flood Zones</div>
+        </div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-icon" style="color:var(--yellow);filter:drop-shadow(0 0 6px rgba(255,215,0,0.3))">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.8 19.6A2 2 0 1 0 14 16H2m15.5-8a2.5 2.5 0 1 1 2 4H2m7.8-7.6A2 2 0 1 1 11 8H2"/></svg>
+        </div>
+        <div>
+          <div class="stat-num" id="stat-storms">3</div>
+          <div class="stat-label">Storm Watches</div>
+        </div>
+      </div>
+      <div class="stat-tile">
+        <div class="stat-icon" style="color:var(--primary);filter:drop-shadow(0 0 6px rgba(0,212,255,0.3))">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M16 3.128a4 4 0 0 1 0 7.744M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></svg>
+        </div>
+        <div>
+          <div class="stat-num" id="stat-evac">12K</div>
+          <div class="stat-label">Evacuated</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live map -->
+    <div class="panel-box">
+      <div class="panel-header">
+        <div class="panel-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0zm.894.211v15M9 3.236v15"/></svg>
+          Live Incident Map
+        </div>
+        <div class="map-legend">
+          <div class="legend-item"><div class="legend-dot" style="background:var(--red);box-shadow:0 0 5px var(--red)"></div>Critical</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--orange);box-shadow:0 0 5px var(--orange)"></div>High</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--yellow);box-shadow:0 0 5px var(--yellow)"></div>Moderate</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--green);box-shadow:0 0 5px var(--green)"></div>Safe</div>
+        </div>
+      </div>
+      <div id="leaflet-map" style="height:180px; width:100%;"></div>
+
+    <!-- Active alerts -->
+    <div>
+      <div class="section-header">
+        <div class="section-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0m-10.47-5.674A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></svg>
+          Active Alerts
+        </div>
+        <span class="section-sub">Updated live</span>
+      </div>
+      <div class="alert-cards">
+
+        <div class="alert-card red" data-query="There is a wildfire called Camp Fire in Butte County, CA with mandatory evacuation for zones A–D. What should I do?">
+          <div class="alert-top">
+            <div class="alert-level">
+              <div class="alert-dot" style="background:var(--red);box-shadow:0 0 6px var(--red)"></div>
+              <span class="alert-badge" style="color:var(--red)">Critical</span>
+            </div>
+            <span class="alert-time">8 min ago</span>
+          </div>
+          <div class="alert-body">
+            <svg style="color:var(--red)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3q1 4 4 6.5t3 5.5a1 1 0 0 1-14 0a5 5 0 0 1 1-3a1 1 0 0 0 5 0c0-2-1.5-3-1.5-5q0-2 2.5-4"/></svg>
+            <div>
+              <div class="alert-name">Wildfire — Camp Fire</div>
+              <div class="alert-loc">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></svg>
+                Butte County, CA
+              </div>
+              <div class="alert-desc">Rapidly spreading wildfire. Mandatory evacuation for zones A–D. Avoid Highway 99 North.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="alert-card orange" data-query="There is a Flash Flood Warning in Harris County, TX. Heavy rainfall causing flash flooding. What safety steps should I take?">
+          <div class="alert-top">
+            <div class="alert-level">
+              <div class="alert-dot" style="background:var(--orange);box-shadow:0 0 6px var(--orange)"></div>
+              <span class="alert-badge" style="color:var(--orange)">High</span>
+            </div>
+            <span class="alert-time">22 min ago</span>
+          </div>
+          <div class="alert-body">
+            <svg style="color:var(--orange)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242M16 14v6m-8-6v6m4-4v6"/></svg>
+            <div>
+              <div class="alert-name">Flash Flood Warning</div>
+              <div class="alert-loc">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></svg>
+                Harris County, TX
+              </div>
+              <div class="alert-desc">Heavy rainfall causing flash flooding. Do not attempt to cross flooded roads.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="alert-card yellow" data-query="A Tropical Storm Watch is active in Gulf Coast, LA with expected landfall in 36 hours. How should I prepare?">
+          <div class="alert-top">
+            <div class="alert-level">
+              <div class="alert-dot" style="background:var(--yellow);box-shadow:0 0 6px var(--yellow)"></div>
+              <span class="alert-badge" style="color:var(--yellow)">Moderate</span>
+            </div>
+            <span class="alert-time">1 hr ago</span>
+          </div>
+          <div class="alert-body">
+            <svg style="color:var(--yellow)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12.8 19.6A2 2 0 1 0 14 16H2m15.5-8a2.5 2.5 0 1 1 2 4H2m7.8-7.6A2 2 0 1 1 11 8H2"/></svg>
+            <div>
+              <div class="alert-name">Tropical Storm Watch</div>
+              <div class="alert-loc">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></svg>
+                Gulf Coast, LA
+              </div>
+              <div class="alert-desc">Tropical storm strengthening. Expected landfall in 36 hours. Prepare emergency kits.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="alert-card green" data-query="A magnitude 4.2 earthquake was detected in Clark County, NV. No injuries reported but aftershocks are possible. What precautions should I take?">
+          <div class="alert-top">
+            <div class="alert-level">
+              <div class="alert-dot" style="background:var(--green);box-shadow:0 0 6px var(--green)"></div>
+              <span class="alert-badge" style="color:var(--green)">Safe</span>
+            </div>
+            <span class="alert-time">2 hr ago</span>
+          </div>
+          <div class="alert-body">
+            <svg style="color:var(--green)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12l2 2l4-4"/></svg>
+            <div>
+              <div class="alert-name">Earthquake — M4.2</div>
+              <div class="alert-loc">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></svg>
+                Clark County, NV
+              </div>
+              <div class="alert-desc">Minor earthquake detected. No injuries reported. Aftershocks possible.</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+    <!-- ⬇️ PASTE EARTHQUAKE WIDGET HERE ⬇️ -->
+    <div id="earthquake-panel" class="panel-box" style="padding:16px;">
+      <h3 style="font-size:13px;color:var(--fg);margin-bottom:10px;display:flex;align-items:center;gap:8px;">
+        🌍 Live Earthquakes — India
+      </h3>
+      <ul id="eq-list" style="list-style:none;display:flex;flex-direction:column;gap:8px;font-size:12px;color:var(--muted);">
+        Loading...
+      </ul>
+    </div>
+    <script>
+      fetch(`http://127.0.0.1:8000/earthquakes/india`)
+        .then(r => r.json())
+        .then(data => {
+          const list = document.getElementById('eq-list');
+          list.innerHTML = data.earthquakes.map(eq => `
+            <li style="padding:8px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;">
+              <b style="color:var(--fg)">M${eq.magnitude}</b> — ${eq.place}
+              ${eq.tsunami ? '<span style="color:var(--red)">🌊 Tsunami Warning!</span>' : ''}
+            </li>`).join('');
+        })
+        .catch(() => {
+          document.getElementById('eq-list').innerHTML =
+            '<li>⚠️ Offline — connect to refresh alerts</li>';
+        });
+    </script>
+    <!-- ⬆️ END EARTHQUAKE WIDGET ⬆️ -->
+  </aside>
+
+  <!-- Right panel -->
+  <section id="right-panel">
+
+    <!-- Info bar -->
+    <div id="info-bar">
+      <div class="info-tag"><div class="info-pulse"></div> SKY is ready</div>
+      <div class="info-bar-divider"></div>
+      <span class="info-text">Voice mode available — click the mic icon to speak</span>
+      <div class="info-bar-divider"></div>
+      <span class="info-text">Supports 16 languages including Hindi, Urdu, Arabic &amp; more</span>
+      <div class="info-shortcuts">
+        <span class="kbd">L</span><span class="kbd-label">Change Language</span>
+        <span class="kbd" style="margin-left:8px">E</span><span class="kbd-label">Emergency</span>
+      </div>
+    </div>
+
+    <!-- Chat panel -->
+    <div id="chat-panel">
+      <div id="chat-header">
+        <div class="chat-agent">
+          <div class="agent-avatar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2m16 0h2m-7-1v2m-6-2v2"/></svg>
+          </div>
+          <div>
+            <div class="agent-name">SKY Assistant</div>
+            <div class="agent-status"><div class="agent-status-dot"></div> Ready to assist</div>
+          </div>
+        </div>
+        <div class="chat-header-btns">
+          <button class="icon-btn" id="header-mic-btn" title="Toggle voice mode" onclick="setMode('voice')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19v3m7-12v2a7 7 0 0 1-14 0v-2"/><rect width="6" height="13" x="9" y="2" rx="3"/></svg>
+          </button>
+          <button class="icon-btn" title="Clear chat" onclick="clearChat()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9a9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5m5 4a9 9 0 0 1-9 9a9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div id="chat-messages">
+        <div class="empty-state" id="empty-state">
+          <div class="empty-icon">💬</div>
+          <p>Ask about disaster safety, evacuations, alerts...</p>
+        </div>
+      </div>
+
+      <div id="chat-input-area">
+        <!-- Mode toggle -->
+        <div class="mode-toggle">
+          <button class="mode-btn active" id="btn-text" onclick="setMode('text')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M10 8h.01M12 12h.01M14 8h.01M16 12h.01M18 8h.01M6 8h.01M7 16h10m-9-4h.01"/><rect width="20" height="16" x="2" y="4" rx="2"/></svg>
+            Text
+          </button>
+          <button class="mode-btn inactive" id="btn-voice" onclick="setMode('voice')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19v3m7-12v2a7 7 0 0 1-14 0v-2"/><rect width="6" height="13" x="9" y="2" rx="3"/></svg>
+            Voice
+          </button>
+        </div>
+
+        <!-- Text mode -->
+        <div class="input-row" id="text-input-row">
+          <textarea id="user-input" placeholder="Ask about disaster safety, evacuations, alerts..." rows="1"></textarea>
+          <button id="send-btn" onclick="handleSend()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11zm7.318-19.539l-10.94 10.939"/></svg>
+            Send
+          </button>
+        </div>
+
+        <!-- Voice mode -->
+        <div id="mic-area">
+          <button id="mic-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="9" y1="22" x2="15" y2="22"/></svg>
+          </button>
+          <span class="mic-label" id="mic-label">Click to speak</span>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- ── Language modal ── -->
+<div id="lang-modal" role="dialog" aria-modal="true" aria-label="Select language">
+  <div class="modal-box">
+    <div class="modal-title">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20a14.5 14.5 0 0 0 0-20M2 12h20"/></svg>
+      Select Response Language
+    </div>
+    <div class="lang-grid" id="lang-grid"></div>
+    <div class="modal-footer">
+      <button class="modal-close" onclick="closeLangModal()">Done</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Emergency modal ── -->
+<div id="emergency-modal" role="dialog" aria-modal="true">
+  <div class="emergency-box">
+    <div class="emergency-title">🚨 Emergency Contacts</div>
+    <div class="emergency-numbers">
+      <div class="emergency-number"><span>Police / Fire / Ambulance</span><strong>911</strong></div>
+      <div class="emergency-number"><span>FEMA Helpline</span><strong>1-800-621-3362</strong></div>
+      <div class="emergency-number"><span>Red Cross</span><strong>1-800-733-2767</strong></div>
+      <div class="emergency-number"><span>Disaster Distress</span><strong>1-800-985-5990</strong></div>
+    </div>
+    <button class="emergency-close" onclick="closeEmergencyModal()">Close</button>
+  </div>
+</div>
+
+<script>
+  /* ── Config ── */
+  const BACKEND = 'http://127.0.0.1:8000';
+
+  /* ════════════════════════════════════════════
+     FEATURE 1 — Live stats from backend
+     Calls GET /stats every 30 s if available.
+     Falls back gracefully to static values.
+  ════════════════════════════════════════════ */
+  async function fetchStats() {
+    try {
+      const res = await fetch(`${BACKEND}/stats`, { signal: AbortSignal.timeout(4000) });
+      if (!res.ok) return;
+      const d = await res.json();
+      if (d.active_fires   !== undefined) document.getElementById('stat-fires').textContent   = d.active_fires;
+      if (d.flood_zones    !== undefined) document.getElementById('stat-floods').textContent  = d.flood_zones;
+      if (d.storm_watches  !== undefined) document.getElementById('stat-storms').textContent  = d.storm_watches;
+      if (d.evacuated      !== undefined) document.getElementById('stat-evac').textContent    = d.evacuated;
+    } catch { /* backend has no /stats endpoint — static values stay */ }
+  }
+  fetchStats();
+  setInterval(fetchStats, 30000);
+
+  /* ── Language data ── */
+  const LANGUAGES = [
+    { code: 'auto', name: 'Auto-detect', flag: '🌐' },
+    { code: 'en',   name: 'English',     flag: '🇬🇧' },
+    { code: 'hi',   name: 'Hindi',       flag: '🇮🇳' },
+    { code: 'es',   name: 'Spanish',     flag: '🇪🇸' },
+    { code: 'fr',   name: 'French',      flag: '🇫🇷' },
+    { code: 'de',   name: 'German',      flag: '🇩🇪' },
+    { code: 'zh-cn',name: 'Chinese',     flag: '🇨🇳' },
+    { code: 'ar',   name: 'Arabic',      flag: '🇸🇦' },
+    { code: 'pt',   name: 'Portuguese',  flag: '🇧🇷' },
+    { code: 'ru',   name: 'Russian',     flag: '🇷🇺' },
+    { code: 'ja',   name: 'Japanese',    flag: '🇯🇵' },
+    { code: 'it',   name: 'Italian',     flag: '🇮🇹' },
+    { code: 'ko',   name: 'Korean',      flag: '🇰🇷' },
+    { code: 'bn',   name: 'Bengali',     flag: '🇧🇩' },
+    { code: 'ur',   name: 'Urdu',        flag: '🇵🇰' },
+    { code: 'tr',   name: 'Turkish',     flag: '🇹🇷' },
+  ];
+
+  const SPEECH_LANG_MAP = {
+    en:'en-US', hi:'hi-IN', es:'es-ES', fr:'fr-FR', de:'de-DE',
+    'zh-cn':'zh-CN', ar:'ar-SA', pt:'pt-BR', ru:'ru-RU', ja:'ja-JP',
+    it:'it-IT', ko:'ko-KR', bn:'bn-BD', ur:'ur-PK', tr:'tr-TR', auto:'en-US'
+  };
+
+  let selectedLang = 'en';
+
+  /* ── Build language grid ── */
+  const langGrid = document.getElementById('lang-grid');
+  LANGUAGES.forEach(l => {
+    const btn = document.createElement('button');
+    btn.className = 'lang-option' + (l.code === selectedLang ? ' selected' : '');
+    btn.textContent = `${l.flag} ${l.name}`;
+    btn.dataset.code = l.code;
+    btn.onclick = () => selectLang(l.code, l.name, btn);
+    langGrid.appendChild(btn);
+  });
+
+  function selectLang(code, name, btn) {
+    selectedLang = code;
+    document.querySelectorAll('.lang-option').forEach(b => b.classList.remove('selected'));
+    btn.classList.add('selected');
+    document.getElementById('active-lang-display').textContent = name;
+  }
+
+  function openLangModal()  { document.getElementById('lang-modal').classList.add('open'); }
+  function closeLangModal() { document.getElementById('lang-modal').classList.remove('open'); }
+
+  function openEmergencyModal()  { document.getElementById('emergency-modal').classList.add('open'); }
+  function closeEmergencyModal() { document.getElementById('emergency-modal').classList.remove('open'); }
+
+  /* ── Keyboard shortcuts ── */
+  document.addEventListener('keydown', e => {
+    if (e.key.toLowerCase() === 'l' && !e.target.closest('textarea')) openLangModal();
+    if (e.key.toLowerCase() === 'e' && !e.target.closest('textarea')) openEmergencyModal();
+    if (e.key === 'Escape') { closeLangModal(); closeEmergencyModal(); }
+  });
+
+  /* Close modals on backdrop click */
+  document.getElementById('lang-modal').addEventListener('click', e => {
+    if (e.target === e.currentTarget) closeLangModal();
+  });
+  document.getElementById('emergency-modal').addEventListener('click', e => {
+    if (e.target === e.currentTarget) closeEmergencyModal();
+  });
+
+  /* ── Mode toggle ── */
+  const textInputRow = document.getElementById('text-input-row');
+  const micArea      = document.getElementById('mic-area');
+  const btnText      = document.getElementById('btn-text');
+  const btnVoice     = document.getElementById('btn-voice');
+
+  function setMode(mode) {
+    if (mode === 'text') {
+      textInputRow.style.display = 'flex';
+      micArea.classList.remove('active');
+      btnText.classList.replace('inactive', 'active');
+      btnVoice.classList.replace('active', 'inactive');
+    } else {
+      textInputRow.style.display = 'none';
+      micArea.classList.add('active');
+      btnVoice.classList.replace('inactive', 'active');
+      btnText.classList.replace('active', 'inactive');
+    }
+  }
+
+  /* ── Helpers ── */
+  const chatMessages = document.getElementById('chat-messages');
+  const userInput    = document.getElementById('user-input');
+  const sendBtn      = document.getElementById('send-btn');
+
+  function getTime() {
+    return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  function removeEmptyState() {
+    const es = document.getElementById('empty-state');
+    if (es) es.remove();
+  }
+  function clearChat() {
+    chatMessages.innerHTML = `<div class="empty-state" id="empty-state"><div class="empty-icon">💬</div><p>Ask about disaster safety, evacuations, alerts...</p></div>`;
+  }
+
+  function addBubble(text, role, langName) {
+    removeEmptyState();
+    const row = document.createElement('div');
+    row.className = `msg-row ${role}`;
+
+    const avatarHTML = role === 'bot'
+      ? `<div class="msg-avatar bot-av"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2m16 0h2m-7-1v2m-6-2v2"/></svg></div>`
+      : `<div class="msg-avatar user-av">YOU</div>`;
+
+    const langTag = (role === 'bot' && langName)
+      ? `<span class="msg-lang">${langName}</span>` : '';
+
+    const metaAlign = role === 'user' ? 'justify-content:flex-end' : '';
+
+    row.innerHTML = `
+      ${role === 'bot' ? avatarHTML : ''}
+      <div class="msg-content">
+        <div class="bubble ${role}">${text}</div>
+        <div class="msg-meta" style="${metaAlign}">
+          ${langTag}
+          <span class="msg-time">${getTime()}</span>
+        </div>
+      </div>
+      ${role === 'user' ? avatarHTML : ''}
+    `;
+    chatMessages.appendChild(row);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
+
+  function showTyping() {
+    removeEmptyState();
+    const row = document.createElement('div');
+    row.className = 'msg-row bot'; row.id = 'typing-row';
+    row.innerHTML = `
+      <div class="msg-avatar bot-av"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2m16 0h2m-7-1v2m-6-2v2"/></svg></div>
+      <div class="bubble bot" style="padding:0">
+        <div class="typing-dots">
+          <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
+        </div>
+      </div>`;
+    chatMessages.appendChild(row);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
+
+  function removeTyping() {
+    const t = document.getElementById('typing-row');
+    if (t) t.remove();
+  }
+
+  /* ── Send message ── */
+  async function handleSend() {
+    const text = userInput.value.trim();
+    if (!text) return;
+
+    addBubble(text, 'user');
+    userInput.value = '';
+    userInput.style.height = 'auto';
+    sendBtn.disabled = true;
+    showTyping();
+
+    try {
+      const res = await fetch(`${BACKEND}/ask`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: text, language: selectedLang })
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      removeTyping();
+      if (data.error) {
+        addBubble(`⚠️ ${data.error}`, 'bot');
+      } else {
+        addBubble(data.answer || 'No response received.', 'bot', data.language_name);
+      }
+    } catch {
+      removeTyping();
+      addBubble(
+        '❌ Could not reach the server.<br><small style="opacity:0.7">Run: <code>uvicorn ask_backend:app --reload --port 8000</code></small>',
+        'bot'
+      );
+    } finally {
+      sendBtn.disabled = false;
+      userInput.focus();
+    }
+  }
+
+  /* Auto-grow textarea */
+  userInput.addEventListener('input', () => {
+    userInput.style.height = 'auto';
+    userInput.style.height = Math.min(userInput.scrollHeight, 100) + 'px';
+  });
+  userInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+  });
+
+  /* ── Real India map with Leaflet ── */
+const map = L.map('leaflet-map', {
+  zoomControl: false,
+  attributionControl: false,
+  dragging: true,
+  scrollWheelZoom: false
+}).setView([22.9734, 78.6569], 4.2); // Center of India
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  maxZoom: 10
+}).addTo(map);
+
+const incidents = [
+  { name: 'Wildfire',   lat: 30.0668, lng: 79.0193, color: '#ff3d3d',
+    query: 'What should I do during a wildfire? How do I evacuate safely?' },
+  { name: 'Flood',      lat: 26.1445, lng: 91.7362, color: '#ff8c00',
+    query: 'There is an active flood zone nearby. What are the immediate steps to stay safe during a flood?' },
+  { name: 'Storm',      lat: 19.0760, lng: 84.4458, color: '#ffd700',
+    query: 'A storm watch is active in my area. What should I do to prepare for a tropical storm or hurricane?' },
+  { name: 'Earthquake', lat: 32.2432, lng: 77.1892, color: '#ff3d3d',
+    query: 'An earthquake has been detected nearby. What immediate actions should I take for earthquake safety?' },
+  { name: 'Resolved',   lat: 13.0827, lng: 80.2707, color: '#00e676',
+    query: 'A disaster in this area has been resolved. What are the steps to safely return home after a disaster?' }
+];
+
+incidents.forEach(inc => {
+  const icon = L.divIcon({
+    className: '',
+    html: `<div style="
+      background:${inc.color}; width:12px; height:12px; border-radius:50%;
+      box-shadow:0 0 8px ${inc.color}; border:2px solid #060d1f;
+      cursor:pointer;"></div>`,
+    iconSize: [12, 12]
+  });
+
+  const marker = L.marker([inc.lat, inc.lng], { icon }).addTo(map);
+  marker.bindTooltip(inc.name, {
+    permanent: true, direction: 'top', offset: [0, -6],
+    className: 'leaflet-incident-label'
+  });
+  marker.on('click', () => askSKY(inc.query));
+});
+
+  /* ════════════════════════════════════════════
+     FEATURE 2 & 3 — askSKY(query)
+     Used by both clickable alert cards and map pins.
+     Scrolls to chat, fills input, sends automatically.
+  ════════════════════════════════════════════ */
+  function askSKY(query) {
+    // Scroll chat panel into view on narrow screens
+    document.getElementById('chat-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    // Switch to text mode so user sees what was typed
+    setMode('text');
+    userInput.value = query;
+    userInput.style.height = 'auto';
+    userInput.style.height = Math.min(userInput.scrollHeight, 100) + 'px';
+    handleSend();
+  }
+
+  /* ── FEATURE 2 — Clickable alert cards ── */
+  // Each card gets a data-query attribute in the HTML.
+  // Here we attach one delegated listener to the whole alerts section.
+  document.querySelectorAll('.alert-card[data-query]').forEach(card => {
+    card.style.cursor = 'pointer';
+    card.title = 'Click to ask SKY about this alert';
+    card.addEventListener('click', () => askSKY(card.dataset.query));
+  });
+
+  /* ── FEATURE 3 — Clickable map pins ── */
+  document.querySelectorAll('.map-pin[data-query]').forEach(pin => {
+    pin.style.cursor = 'pointer';
+    pin.title = 'Click to ask SKY about this incident';
+    // Hover highlight
+    pin.addEventListener('mouseenter', () => pin.style.transform = 'translate(-50%,-50%) scale(1.15)');
+    pin.addEventListener('mouseleave', () => pin.style.transform = 'translate(-50%,-50%) scale(1)');
+    pin.style.transition = 'transform 0.15s';
+    pin.addEventListener('click', () => askSKY(pin.dataset.query));
+  });
+
+  /* ════════════════════════════════════════════
+     FEATURE 4 — Voice mic always uses selected language
+     Recognition language is read at the moment the mic
+     starts, so changing the dropdown mid-session works.
+  ════════════════════════════════════════════ */
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const micBtn   = document.getElementById('mic-btn');
+  const micLabel = document.getElementById('mic-label');
+
+  if (!SpeechRecognition) {
+    btnVoice.style.display = 'none';
+    document.getElementById('header-mic-btn').style.display = 'none';
+  } else {
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    let isListening = false;
+
+    micBtn.addEventListener('click', () => {
+      if (isListening) { recognition.stop(); return; }
+      // ← Always read selectedLang at click time, not at page load
+      recognition.lang = SPEECH_LANG_MAP[selectedLang] || 'en-US';
+      recognition.start();
+    });
+
+    recognition.onstart = () => {
+      isListening = true;
+      micBtn.classList.add('listening');
+      micLabel.textContent = `🔴 Listening in ${document.getElementById('active-lang-display').textContent} — click to stop`;
+    };
+    recognition.onend = () => {
+      isListening = false;
+      micBtn.classList.remove('listening');
+      micLabel.textContent = 'Click to speak';
+    };
+    recognition.onresult = (event) => {
+      const spoken = event.results[0][0].transcript;
+      setMode('text');
+      userInput.value = spoken;
+      handleSend();
+    };
+    recognition.onerror = (event) => {
+      isListening = false;
+      micBtn.classList.remove('listening');
+      micLabel.textContent = 'Click to speak';
+      let msg = '🎤 Microphone error.';
+      if (event.error === 'not-allowed') msg = '🎤 Mic permission denied. Allow mic in browser settings.';
+      if (event.error === 'no-speech')   msg = '🎤 No speech detected. Try again.';
+      addBubble(msg, 'bot');
+    };
+  }
+</script>
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/service-worker.js')
+      .then(() => console.log('SKY offline ready ✅'));
+  }
+</script>
+</body>
+</html>
